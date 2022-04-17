@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 type Page struct {
@@ -27,7 +28,15 @@ func (p *Page) processDirs() error {
 		fmt.Println("dir: ", dir)
 		files, _ := os.ReadDir(dir)
 		for _, file := range files {
-			fmt.Println("dir: file: ", file)
+			fn := file.Name()
+			if filepath.Ext(fn) != ".md" {
+				continue
+			}
+
+			fp := filepath.Join(dir, fn)
+			fmt.Println("path: ", fp)
+			// src, _ := os.ReadFile(fp)
+			// fmt.Println("html: ", string(bf.Run(src)))
 		}
 	}
 	return nil
