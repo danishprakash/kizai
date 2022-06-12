@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/html"
@@ -18,6 +19,8 @@ type Page struct {
 
 const DIR = "/home/danish/work/interviewstreet/programming/mine/site/content"
 const BUILD_DIR = "/home/danish/work/interviewstreet/programming/mine/site/build"
+const STATIC = "/home/danish/work/interviewstreet/programming/mine/site/assets/css"
+const TEMPLATES = "/home/danish/work/interviewstreet/programming/mine/site/templates"
 
 func chdir() {
 	_ = os.Chdir(DIR)
@@ -81,9 +84,14 @@ func (p *Page) processFiles() error {
 			continue
 		}
 
-		htmlDir := filepath.Join(BUILD_DIR, strings.TrimSuffix(file, ".md"))
-		os.Mkdir(htmlDir, 0755)
-		htmlFile := filepath.Join(htmlDir, "index.html")
+		var htmlFile string
+		if file == "_index.md" {
+			htmlFile = filepath.Join(BUILD_DIR, "index.html")
+		} else {
+			htmlDir := filepath.Join(BUILD_DIR, strings.TrimSuffix(file, ".md"))
+			os.Mkdir(htmlDir, 0755)
+			htmlFile = filepath.Join(htmlDir, "index.html")
+		}
 
 		md, err := ioutil.ReadFile(file)
 		if err != nil {
@@ -97,10 +105,31 @@ func (p *Page) processFiles() error {
 		}
 
 		html := mdToHTML(md)
-		_, err = f.Write(html)
-		if err != nil {
-			panic("failed to write file")
+		if file != "_index.md" {
+			fmt.Println("skipping file: ", file)
+			_, err = f.Write(html)
+			if err != nil {
+				panic("failed to write file")
+			}
+			continue
 		}
+		fmt.Println("html: ", string(html))
+
+		fmt.Println(f.Name())
+		// execute template
+		templPath := filepath.Join(TEMPLATES, "index.html")
+
+		var b []byte
+		if b, err = os.ReadFile(templPath); err != nil {
+			return err
+		}
+
+		tmpl := template.Must(template.New("").Parse(string(b)))
+		if err = tmpl.Execute(f, string(html)); err != nil {
+			fmt.Println("failed to execute template ", err)
+			return err
+		}
+
 	}
 	return nil
 }
@@ -136,4 +165,8 @@ func main() {
 	page.process()
 	buildStaticDir := filepath.Join(BUILD_DIR, "static")
 	os.Mkdir(buildStaticDir, 0755)
+	if err := CopyDir(STATIC, buildStaticDir); err != nil {
+		fmt.Printf("error copying static directory: %+v", err)
+		os.Exit(1)
+	}
 }
