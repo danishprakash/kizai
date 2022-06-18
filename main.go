@@ -15,6 +15,7 @@ import (
 type Page struct {
 	Files []string
 	Dirs  []string
+	Posts []Post
 }
 
 const DIR = "/home/danish/work/interviewstreet/programming/mine/site/content"
@@ -60,13 +61,17 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 			if err != nil {
 				panic("failed to read file")
 			}
+
+			// TODO: wrap this method to also
+			// include template execution
 			html := mdToHTML(md)
 
 			// https://danishpraka.sh/posts/slug/
 			slug := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-			htmlFile := filepath.Join(dstDir, fmt.Sprintf("%s.html", slug))
+			os.Mkdir(filepath.Join(dstDir, slug), 0755)
+			htmlFile := filepath.Join(dstDir, slug, "index.html")
+
 			fmt.Println("slug: ", htmlFile)
-			// os.Mkdir(filepath.Join(dstDir, slug), 0755)
 			f, err := os.Create(htmlFile)
 			if err != nil {
 				fmt.Println("failed to create file", err)
@@ -76,6 +81,11 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 			if err != nil {
 				panic("failed to write file")
 			}
+
+			// Parse frontmatter from the post (title, date)
+			p.Posts = append(p.Posts, Post{
+				Title: slug,
+			})
 		}
 	}
 	dirCh <- true
@@ -132,6 +142,8 @@ func (p *Page) processFiles(dirCh <-chan bool) error {
 			break
 		}
 
+		// Load all templates
+		// Execute with frontmatter and body(list of posts)
 		fmt.Println("html: ", string(html))
 
 		fmt.Println(f.Name())
