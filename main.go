@@ -32,13 +32,20 @@ func chdir() {
 	fmt.Println(currDir)
 }
 
-func (p *Page) processDirs() error {
+type Post struct {
+	Title string
+	Date  string
+}
+
+// handle posts/
+func (p *Page) processDirs(dirCh chan<- bool) {
 	for _, dir := range p.Dirs {
 		fmt.Println("dir: ", dir)
 		srcDir := filepath.Join(DIR, dir)
 		dstDir := filepath.Join(BUILD_DIR, dir)
 		os.Mkdir(dstDir, 0755)
 
+		// iterate over all the posts
 		files, _ := os.ReadDir(dir)
 		for _, file := range files {
 			fn := file.Name()
@@ -47,12 +54,15 @@ func (p *Page) processDirs() error {
 			}
 
 			fmt.Println(dstDir, file.Name())
+
+			// absolute filepath for current file
 			md, err := ioutil.ReadFile(filepath.Join(srcDir, file.Name()))
 			if err != nil {
 				panic("failed to read file")
 			}
 			html := mdToHTML(md)
 
+			// https://danishpraka.sh/posts/slug/
 			slug := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
 			htmlFile := filepath.Join(dstDir, fmt.Sprintf("%s.html", slug))
 			fmt.Println("slug: ", htmlFile)
@@ -68,7 +78,7 @@ func (p *Page) processDirs() error {
 			}
 		}
 	}
-	return nil
+	dirCh <- true
 }
 
 func mdToHTML(md []byte) []byte {
@@ -78,7 +88,7 @@ func mdToHTML(md []byte) []byte {
 	return markdown.ToHTML(md, nil, renderer)
 }
 
-func (p *Page) processFiles() error {
+func (p *Page) processFiles(dirCh <-chan bool) error {
 	for _, file := range p.Files {
 		if filepath.Ext(file) != ".md" {
 			continue
@@ -113,6 +123,15 @@ func (p *Page) processFiles() error {
 			}
 			continue
 		}
+
+		// render posts
+
+		// wait for posts to be rendered
+		select {
+		case <-dirCh:
+			break
+		}
+
 		fmt.Println("html: ", string(html))
 
 		fmt.Println(f.Name())
@@ -149,8 +168,10 @@ func (p *Page) process() error {
 		}
 	}
 
-	p.processDirs()
-	p.processFiles()
+	dirCh := make(chan bool, 1)
+
+	p.processDirs(dirCh)
+	p.processFiles(dirCh)
 
 	return nil
 }
