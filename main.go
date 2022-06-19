@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
 
+	"github.com/gernest/front"
 	"github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/html"
 )
@@ -34,8 +34,11 @@ func chdir() {
 }
 
 type Post struct {
-	Title string
-	Date  string
+	Title       string
+	Slug        string
+	Date        string
+	Frontmatter map[string]interface{}
+	Body        []byte
 }
 
 // handle posts/
@@ -56,22 +59,35 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 
 			fmt.Println(dstDir, file.Name())
 
-			// absolute filepath for current file
-			md, err := ioutil.ReadFile(filepath.Join(srcDir, file.Name()))
+			// parse frontmatter
+			m := front.NewMatter()
+			m.Handle("---", front.YAMLHandler)
+			file, err := os.Open(filepath.Join(srcDir, file.Name()))
+			fm, md, err := m.Parse(file)
 			if err != nil {
-				panic("failed to read file")
+				panic("failed to parse file")
 			}
+
+			fmt.Println("fm: ", fm)
+			fmt.Println("body: ", md)
+
+			// absolute filepath for current file
+			// md, err := ioutil.ReadFile(filepath.Join(srcDir, file.Name()))
+			// if err != nil {
+			// 	panic("failed to read file")
+			// }
 
 			// TODO: wrap this method to also
 			// include template execution
-			html := mdToHTML(md)
+			html := mdToHTML([]byte(md))
 
 			// https://danishpraka.sh/posts/slug/
-			slug := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-			os.Mkdir(filepath.Join(dstDir, slug), 0755)
+			slug := strings.TrimSuffix(filepath.Base(file.Name()), filepath.Ext(file.Name()))
+			fmt.Println("slug= ", slug)
+			os.MkdirAll(filepath.Join(dstDir, slug), 0755)
 			htmlFile := filepath.Join(dstDir, slug, "index.html")
 
-			fmt.Println("slug: ", htmlFile)
+			// fmt.Println("slug: ", html)
 			f, err := os.Create(htmlFile)
 			if err != nil {
 				fmt.Println("failed to create file", err)
@@ -79,12 +95,17 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 
 			_, err = f.Write(html)
 			if err != nil {
+				fmt.Println("err writing to file", err)
 				panic("failed to write file")
 			}
 
+			// TODO: sort posts by date
 			// Parse frontmatter from the post (title, date)
 			p.Posts = append(p.Posts, Post{
-				Title: slug,
+				Slug:        slug,
+				Title:       fm["title"].(string),
+				Frontmatter: fm,
+				Body:        html,
 			})
 		}
 	}
@@ -113,9 +134,15 @@ func (p *Page) processFiles(dirCh <-chan bool) error {
 			htmlFile = filepath.Join(htmlDir, "index.html")
 		}
 
-		md, err := ioutil.ReadFile(file)
+		// parse frontmatter and body
+		// from the md file
+		m := front.NewMatter()
+		m.Handle("---", front.YAMLHandler)
+		fl, err := os.Open(file)
+		fm, md, err := m.Parse(fl)
 		if err != nil {
-			panic("failed to read file")
+			fmt.Println("err: ", file, err)
+			panic("failed to parse file")
 		}
 
 		// fmt.Printf("html for file: %s\n%s\n======\n", file, string(html))
@@ -124,7 +151,7 @@ func (p *Page) processFiles(dirCh <-chan bool) error {
 			fmt.Println("failed to create file", err)
 		}
 
-		html := mdToHTML(md)
+		html := mdToHTML([]byte(md))
 		if file != "_index.md" {
 			fmt.Println("skipping file: ", file)
 			_, err = f.Write(html)
@@ -145,10 +172,11 @@ func (p *Page) processFiles(dirCh <-chan bool) error {
 		// Load all templates
 		// Execute with frontmatter and body(list of posts)
 		fmt.Println("html: ", string(html))
+		_, err = f.Write(html)
 
 		fmt.Println(f.Name())
 		// execute template
-		templPath := filepath.Join(TEMPLATES, "index.html")
+		templPath := filepath.Join(TEMPLATES, fmt.Sprintf("%s.html", fm["layout"]))
 
 		var b []byte
 		if b, err = os.ReadFile(templPath); err != nil {
@@ -156,7 +184,7 @@ func (p *Page) processFiles(dirCh <-chan bool) error {
 		}
 
 		tmpl := template.Must(template.New("").Parse(string(b)))
-		if err = tmpl.Execute(f, string(html)); err != nil {
+		if err = tmpl.Execute(f, p.Posts); err != nil {
 			fmt.Println("failed to execute template ", err)
 			return err
 		}
