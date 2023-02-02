@@ -18,19 +18,22 @@ type Page struct {
 	Posts []Post
 }
 
-const DIR = "/home/danish/work/interviewstreet/programming/mine/site/content"
-const BUILD_DIR = "/home/danish/work/interviewstreet/programming/mine/site/build"
-const STATIC = "/home/danish/work/interviewstreet/programming/mine/site/assets/css"
-const TEMPLATES = "/home/danish/work/interviewstreet/programming/mine/site/templates"
+const (
+	BASE_DIR  = "/home/danishprakash/code/kizai-site"
+	DIR       = BASE_DIR + "/pages"
+	BUILD_DIR = BASE_DIR + "/build"
+	STATIC    = BASE_DIR + "/static/css"
+	TEMPLATES = BASE_DIR + "/templates"
+)
 
 func chdir() {
 	_ = os.Chdir(DIR)
-	currDir, err := os.Getwd()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Println(currDir)
+	// currDir, err := os.Getwd()
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	// fmt.Println(currDir)
 }
 
 type Post struct {
@@ -44,7 +47,7 @@ type Post struct {
 // handle posts/
 func (p *Page) processDirs(dirCh chan<- bool) {
 	for _, dir := range p.Dirs {
-		fmt.Println("dir: ", dir)
+		// fmt.Println("dir: ", dir)
 		srcDir := filepath.Join(DIR, dir)
 		dstDir := filepath.Join(BUILD_DIR, dir)
 		os.Mkdir(dstDir, 0755)
@@ -57,7 +60,7 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 				continue
 			}
 
-			fmt.Println(dstDir, file.Name())
+			// fmt.Println(dstDir, file.Name())
 
 			// parse frontmatter
 			m := front.NewMatter()
@@ -68,8 +71,8 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 				panic("failed to parse file")
 			}
 
-			fmt.Println("fm: ", fm)
-			fmt.Println("body: ", md)
+			// fmt.Println("fm: ", fm)
+			// fmt.Println("body: ", md)
 
 			// absolute filepath for current file
 			// md, err := ioutil.ReadFile(filepath.Join(srcDir, file.Name()))
@@ -83,7 +86,7 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 
 			// https://danishpraka.sh/posts/slug/
 			slug := strings.TrimSuffix(filepath.Base(file.Name()), filepath.Ext(file.Name()))
-			fmt.Println("slug= ", slug)
+			// fmt.Println("slug= ", slug)
 			os.MkdirAll(filepath.Join(dstDir, slug), 0755)
 			htmlFile := filepath.Join(dstDir, slug, "index.html")
 
@@ -101,9 +104,14 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 
 			// TODO: sort posts by date
 			// Parse frontmatter from the post (title, date)
+			// fmt.Println(file.Name(), fm["title"])
+			var title string
+			if fm["title"] != nil {
+				title = fmt.Sprintf("%v", fm["title"])
+			}
 			p.Posts = append(p.Posts, Post{
 				Slug:        slug,
-				Title:       fm["title"].(string),
+				Title:       title,
 				Frontmatter: fm,
 				Body:        html,
 			})
@@ -121,7 +129,7 @@ func mdToHTML(md []byte) []byte {
 
 func (p *Page) processFiles(dirCh <-chan bool) error {
 	for _, file := range p.Files {
-		if filepath.Ext(file) != ".md" {
+		if filepath.Ext(file) != ".md" || strings.Contains(filepath.Base(file), "readme") {
 			continue
 		}
 
@@ -145,7 +153,7 @@ func (p *Page) processFiles(dirCh <-chan bool) error {
 			panic("failed to parse file")
 		}
 
-		// fmt.Printf("html for file: %s\n%s\n======\n", file, string(html))
+		fmt.Printf("htmlFile: %s\n", htmlFile)
 		f, err := os.Create(htmlFile)
 		if err != nil {
 			fmt.Println("failed to create file", err)
@@ -171,10 +179,10 @@ func (p *Page) processFiles(dirCh <-chan bool) error {
 
 		// Load all templates
 		// Execute with frontmatter and body(list of posts)
-		fmt.Println("html: ", string(html))
+		// fmt.Println("html: ", string(html))
 		_, err = f.Write(html)
 
-		fmt.Println(f.Name())
+		// fmt.Println(f.Name())
 		// execute template
 		templPath := filepath.Join(TEMPLATES, fmt.Sprintf("%s.html", fm["layout"]))
 
@@ -201,6 +209,7 @@ func (p *Page) process() error {
 	}
 
 	for _, f := range files {
+		fmt.Printf("process: %s\n", f.Name())
 		if f.IsDir() {
 			p.Dirs = append(p.Dirs, f.Name())
 		} else {
@@ -216,14 +225,25 @@ func (p *Page) process() error {
 	return nil
 }
 
+func clearIfDirExists(dir string) {
+	err := os.RemoveAll(dir)
+	if err != nil {
+		panic(err)
+	}
+}
+
 func setup() {
+	clearIfDirExists(BUILD_DIR)
 	os.Mkdir(BUILD_DIR, 0755)
 }
 
 func main() {
 	setup()
 	page := &Page{}
-	page.process()
+	if err := page.process(); err != nil {
+		panic(err)
+	}
+
 	buildStaticDir := filepath.Join(BUILD_DIR, "static")
 	os.Mkdir(buildStaticDir, 0755)
 	if err := CopyDir(STATIC, buildStaticDir); err != nil {
