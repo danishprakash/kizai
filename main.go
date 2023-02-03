@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/danishprakash/kizai/markdown"
-	"github.com/gernest/front"
+	md "github.com/danishprakash/kizai/markdown"
+	"github.com/sirupsen/logrus"
 )
 
-type Page struct {
+type Blog struct {
 	Files []string
 	Dirs  []string
 	Posts []Post
@@ -43,8 +43,8 @@ type Post struct {
 }
 
 // handle posts/
-func (p *Page) processDirs(dirCh chan<- bool) {
-	for _, dir := range p.Dirs {
+func (b *Blog) processDirs(dirCh chan<- bool) {
+	for _, dir := range b.Dirs {
 		// fmt.Println("dir: ", dir)
 		srcDir := filepath.Join(DIR, dir)
 		dstDir := filepath.Join(BUILD_DIR, dir)
@@ -58,77 +58,72 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 				continue
 			}
 
-			// fmt.Println(dstDir, file.Name())
-
-			// parse frontmatter
-			m := front.NewMatter()
-			m.Handle("---", front.YAMLHandler)
-			file, err := os.Open(filepath.Join(srcDir, file.Name()))
-			fm, md, err := m.Parse(file)
-			if err != nil {
-				panic("failed to parse file")
-			}
-
-			// fmt.Println("fm: ", fm)
-			// fmt.Println("body: ", md)
-
-			// absolute filepath for current file
-			// md, err := ioutil.ReadFile(filepath.Join(srcDir, file.Name()))
-			// if err != nil {
-			// 	panic("failed to read file")
-			// }
-
-			// TODO: wrap this method to also
-			// include template execution
-			html := markdown.MDToHTML([]byte(md))
+			mdFilepath := filepath.Join(srcDir, file.Name())
 
 			// https://danishpraka.sh/posts/slug/
 			slug := strings.TrimSuffix(filepath.Base(file.Name()), filepath.Ext(file.Name()))
-			// fmt.Println("slug= ", slug)
 			os.MkdirAll(filepath.Join(dstDir, slug), 0755)
 			htmlFile := filepath.Join(dstDir, slug, "index.html")
 
-			// fmt.Println("slug: ", html)
-			f, err := os.Create(htmlFile)
-			if err != nil {
-				fmt.Println("failed to create file", err)
+			page := md.Page{}
+			if err := page.ParseFrontmatter(mdFilepath); err != nil {
+				logrus.Errorf("processDir: %+v", err)
 			}
 
-			_, err = f.Write(html)
+			err := page.RenderHTML(md.MarkdownToHTML(mdFilepath), htmlFile)
 			if err != nil {
-				fmt.Println("err writing to file", err)
-				panic("failed to write file")
+				logrus.Errorf("processDir: %+v", err)
 			}
 
 			// TODO: sort posts by date
 			// Parse frontmatter from the post (title, date)
 			// fmt.Println(file.Name(), fm["title"])
 			var title string
-			if fm["title"] != nil {
-				title = fmt.Sprintf("%v", fm["title"])
+			if page.FM["title"] != nil {
+				title = fmt.Sprintf("%v", page.FM["title"])
 			}
-			p.Posts = append(p.Posts, Post{
+			b.Posts = append(b.Posts, Post{
 				Slug:        slug,
 				Title:       title,
-				Frontmatter: fm,
-				Body:        html,
+				Frontmatter: page.FM,
+				Body:        md.MarkdownToHTML(mdFilepath),
 			})
 		}
+
+		// parse index pages for
+		// directories within pages:
+		//     build/books/index.html
+		//     build/posts/index.html
+		indexHTML := filepath.Join(srcDir, "index.html")
+		indexMDFilepath := filepath.Join(srcDir, "index.md")
+
+		page := md.Page{}
+		if err := page.ParseFrontmatter(indexMDFilepath); err != nil {
+			logrus.Errorf("processDir: %+v", err)
+		}
+
+		err := page.RenderHTML(md.MarkdownToHTML(indexMDFilepath), indexHTML)
+		if err != nil {
+			logrus.Errorf("processDir: %+v", err)
+		}
+
 	}
 	dirCh <- true
-	fmt.Println("***DONE***")
 }
 
-func (p *Page) processFiles(dirCh <-chan bool) error {
+func (p *Blog) processFiles(dirCh <-chan bool) error {
 	for _, file := range p.Files {
+		// TODO: rm this
 		if filepath.Ext(file) != ".md" || strings.Contains(filepath.Base(file), "readme") {
 			continue
 		}
-		fmt.Println("file: ", file)
+		// fmt.Println("file: ", file)
+
+		mdFilepath := filepath.Join(DIR, file)
 
 		var htmlFile string
-		// pages/index.md => build/index.html (root)
 		if file == "index.md" {
+			// pages/index.md => build/index.html (root)
 			htmlFile = filepath.Join(BUILD_DIR, "index.html")
 		} else {
 			// pages/about.md => build/about/index.html
@@ -137,28 +132,24 @@ func (p *Page) processFiles(dirCh <-chan bool) error {
 			htmlFile = filepath.Join(htmlDir, "index.html")
 		}
 
-		// parse frontmatter and body from md file
-		m := front.NewMatter()
-		m.Handle("---", front.YAMLHandler)
-		fl, err := os.Open(file)
-		fm, md, err := m.Parse(fl)
-		if err != nil {
-			fmt.Println("err: ", file, err)
-			panic("failed to parse file")
+		htmlBody := md.MarkdownToHTML(mdFilepath)
+
+		page := md.Page{}
+		if err := page.ParseFrontmatter(htmlFile); err != nil {
+			logrus.Errorf("processDir: %+v", err)
 		}
 
-		f, err := os.Create(htmlFile)
+		page.RenderHTML(htmlBody, htmlFile)
+		err := page.RenderHTML(htmlBody, htmlFile)
 		if err != nil {
-			fmt.Println("failed to create file", err)
+			logrus.Errorf("processDir: %+v", err)
 		}
 
-		htmlBody := markdown.MDToHTML([]byte(md))
-		markdown.RenderHTML(htmlBody, fm, f)
 	}
 	return nil
 }
 
-func (p *Page) process() error {
+func (b *Blog) process() error {
 	chdir()
 	files, err := os.ReadDir(".")
 	if err != nil {
@@ -168,16 +159,16 @@ func (p *Page) process() error {
 	for _, f := range files {
 		fmt.Printf("process: %s\n", f.Name())
 		if f.IsDir() {
-			p.Dirs = append(p.Dirs, f.Name())
+			b.Dirs = append(b.Dirs, f.Name())
 		} else {
-			p.Files = append(p.Files, f.Name())
+			b.Files = append(b.Files, f.Name())
 		}
 	}
 
 	dirCh := make(chan bool, 1)
 
-	p.processDirs(dirCh)
-	p.processFiles(dirCh)
+	b.processDirs(dirCh)
+	b.processFiles(dirCh)
 
 	close(dirCh)
 
@@ -198,8 +189,8 @@ func setup() {
 
 func main() {
 	setup()
-	page := &Page{}
-	if err := page.process(); err != nil {
+	blog := &Blog{}
+	if err := blog.process(); err != nil {
 		panic(err)
 	}
 
