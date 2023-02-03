@@ -30,7 +30,7 @@ func (p *Page) ParseFrontmatter(file string) error {
 	fl, err := os.Open(file)
 	fm, md, err := m.Parse(fl)
 	if err != nil {
-		logrus.Errorf("err: %+v", err)
+		// logrus.Errorf("err: %+v", err)
 		return err
 	}
 
