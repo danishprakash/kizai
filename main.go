@@ -5,11 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
 
+	"github.com/danishprakash/kizai/markdown"
 	"github.com/gernest/front"
-	"github.com/gomarkdown/markdown"
-	"github.com/gomarkdown/markdown/html"
 )
 
 type Page struct {
@@ -82,7 +80,7 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 
 			// TODO: wrap this method to also
 			// include template execution
-			html := mdToHTML([]byte(md))
+			html := markdown.MDToHTML([]byte(md))
 
 			// https://danishpraka.sh/posts/slug/
 			slug := strings.TrimSuffix(filepath.Base(file.Name()), filepath.Ext(file.Name()))
@@ -118,13 +116,7 @@ func (p *Page) processDirs(dirCh chan<- bool) {
 		}
 	}
 	dirCh <- true
-}
-
-func mdToHTML(md []byte) []byte {
-	htmlFlags := html.CommonFlags | html.HrefTargetBlank
-	opts := html.RendererOptions{Flags: htmlFlags}
-	renderer := html.NewRenderer(opts)
-	return markdown.ToHTML(md, nil, renderer)
+	fmt.Println("***DONE***")
 }
 
 func (p *Page) processFiles(dirCh <-chan bool) error {
@@ -132,18 +124,20 @@ func (p *Page) processFiles(dirCh <-chan bool) error {
 		if filepath.Ext(file) != ".md" || strings.Contains(filepath.Base(file), "readme") {
 			continue
 		}
+		fmt.Println("file: ", file)
 
 		var htmlFile string
-		if file == "_index.md" {
+		// pages/index.md => build/index.html (root)
+		if file == "index.md" {
 			htmlFile = filepath.Join(BUILD_DIR, "index.html")
 		} else {
+			// pages/about.md => build/about/index.html
 			htmlDir := filepath.Join(BUILD_DIR, strings.TrimSuffix(file, ".md"))
 			os.Mkdir(htmlDir, 0755)
 			htmlFile = filepath.Join(htmlDir, "index.html")
 		}
 
-		// parse frontmatter and body
-		// from the md file
+		// parse frontmatter and body from md file
 		m := front.NewMatter()
 		m.Handle("---", front.YAMLHandler)
 		fl, err := os.Open(file)
@@ -153,50 +147,13 @@ func (p *Page) processFiles(dirCh <-chan bool) error {
 			panic("failed to parse file")
 		}
 
-		fmt.Printf("htmlFile: %s\n", htmlFile)
 		f, err := os.Create(htmlFile)
 		if err != nil {
 			fmt.Println("failed to create file", err)
 		}
 
-		html := mdToHTML([]byte(md))
-		if file != "_index.md" {
-			fmt.Println("skipping file: ", file)
-			_, err = f.Write(html)
-			if err != nil {
-				panic("failed to write file")
-			}
-			continue
-		}
-
-		// render posts
-
-		// wait for posts to be rendered
-		select {
-		case <-dirCh:
-			break
-		}
-
-		// Load all templates
-		// Execute with frontmatter and body(list of posts)
-		// fmt.Println("html: ", string(html))
-		_, err = f.Write(html)
-
-		// fmt.Println(f.Name())
-		// execute template
-		templPath := filepath.Join(TEMPLATES, fmt.Sprintf("%s.html", fm["layout"]))
-
-		var b []byte
-		if b, err = os.ReadFile(templPath); err != nil {
-			return err
-		}
-
-		tmpl := template.Must(template.New("").Parse(string(b)))
-		if err = tmpl.Execute(f, p.Posts); err != nil {
-			fmt.Println("failed to execute template ", err)
-			return err
-		}
-
+		htmlBody := markdown.MDToHTML([]byte(md))
+		markdown.RenderHTML(htmlBody, fm, f)
 	}
 	return nil
 }
@@ -221,6 +178,8 @@ func (p *Page) process() error {
 
 	p.processDirs(dirCh)
 	p.processFiles(dirCh)
+
+	close(dirCh)
 
 	return nil
 }
