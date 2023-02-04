@@ -4,17 +4,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/adrg/frontmatter"
+	cnst "github.com/danishprakash/kizai/constants"
 	"github.com/danishprakash/kizai/template"
-	"github.com/gernest/front"
 	"github.com/sirupsen/logrus"
 
 	"github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/html"
-)
-
-const (
-	BASE_DIR  = "/home/danishprakash/code/kizai-site"
-	TEMPLATES = BASE_DIR + "/templates"
 )
 
 type Page struct {
@@ -23,20 +19,34 @@ type Page struct {
 	MDBody string
 }
 
+// func (p *Page) ParseFrontmatter(file string) error {
+// 	// parse frontmatter and body from md file
+// 	m := front.NewMatter()
+// 	m.Handle("---", front.YAMLHandler)
+// 	fl, err := os.Open(file)
+// 	fm, md, err := m.Parse(fl)
+// 	if err != nil {
+// 		// logrus.Errorf("err: %+v", err)
+// 		return err
+// 	}
+
+// 	p.FM = fm
+// 	p.MDBody = md
+
+// 	return nil
+// }
+
 func (p *Page) ParseFrontmatter(file string) error {
-	// parse frontmatter and body from md file
-	m := front.NewMatter()
-	m.Handle("---", front.YAMLHandler)
 	fl, err := os.Open(file)
-	fm, md, err := m.Parse(fl)
 	if err != nil {
-		// logrus.Errorf("err: %+v", err)
-		return err
+		panic(err)
 	}
 
-	p.FM = fm
-	p.MDBody = md
-
+	md, err := frontmatter.Parse(fl, &p.FM)
+	if err != nil {
+		return err
+	}
+	p.MDBody = string(md)
 	return nil
 }
 
@@ -50,16 +60,16 @@ func Readfile(filepath string) []byte {
 	return d
 }
 
-func MarkdownToHTML(mdFilepath string) []byte {
+func MarkdownToHTML(mdBody string) []byte {
 	htmlFlags := html.CommonFlags | html.HrefTargetBlank
 	opts := html.RendererOptions{Flags: htmlFlags}
 	renderer := html.NewRenderer(opts)
-	return markdown.ToHTML(Readfile(mdFilepath), nil, renderer)
+	return markdown.ToHTML([]byte(mdBody), nil, renderer)
 }
 
 // renders final HTML via templates
-func (p *Page) RenderHTML(htmlBody []byte, htmlFile string) error {
-	t, err := template.Load(TEMPLATES)
+func (p *Page) RenderHTML(htmlFile string, data interface{}) error {
+	t, err := template.Load(cnst.TEMPLATES)
 	if err != nil {
 		logrus.Errorf("RenderHTML: %+v", err)
 		return err
@@ -73,10 +83,11 @@ func (p *Page) RenderHTML(htmlBody []byte, htmlFile string) error {
 		fmt.Println("failed to create file", err)
 	}
 
-	data := struct {
-		FM   map[string]interface{}
-		Body string
-	}{p.FM, string(htmlBody)}
+	// set post.html as default template
+	if p.FM["layout"] == "" {
+		p.FM["layout"] = "post"
+	}
+
 	tmplName := fmt.Sprintf("%s.html", p.FM["layout"])
 	if err := t.ExecuteTemplate(f, tmplName, data); err != nil {
 		fmt.Println("failed to execute template ", err)

@@ -13,8 +13,7 @@ func main() {
 	helpStr := `usage: kizai [options]
 static site generator.
 options:
-    build                       builds the current project
-`
+    build                       builds the current project`
 
 	if len(args) <= 1 {
 		fmt.Println(helpStr)
@@ -24,5 +23,9 @@ options:
 	switch args[1] {
 	case "build":
 		command.Build()
+	case "serve":
+		command.Serve()
+	default:
+		fmt.Println(helpStr)
 	}
 }

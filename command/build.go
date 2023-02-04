@@ -4,30 +4,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
+	cnst "github.com/danishprakash/kizai/constants"
 	md "github.com/danishprakash/kizai/markdown"
 	"github.com/danishprakash/kizai/utils"
 
 	"github.com/sirupsen/logrus"
 )
 
-const (
-	BASE_DIR  = "/home/danishprakash/code/kizai-site"
-	DIR       = BASE_DIR + "/pages"
-	BUILD_DIR = BASE_DIR + "/build"
-	STATIC    = BASE_DIR + "/static/css"
-	TEMPLATES = BASE_DIR + "/templates"
-)
-
 func chdir() {
-	_ = os.Chdir(DIR)
+	_ = os.Chdir(cnst.DIR)
 }
 
 type Blog struct {
 	Files []string
 	Dirs  []string
-	Posts []Post
 }
 
 type Post struct {
@@ -36,15 +29,17 @@ type Post struct {
 	Date        string
 	Frontmatter map[string]interface{}
 	Body        []byte
+	URL         string
 }
 
 // handle posts/
 func (b *Blog) processDirs(dirCh chan<- bool) {
 	for _, dir := range b.Dirs {
-		// fmt.Println("dir: ", dir)
-		srcDir := filepath.Join(DIR, dir)
-		dstDir := filepath.Join(BUILD_DIR, dir)
+		srcDir := filepath.Join(cnst.DIR, dir)
+		dstDir := filepath.Join(cnst.BUILD_DIR, dir)
 		os.Mkdir(dstDir, 0755)
+
+		var posts []Post
 
 		// iterate over all the posts
 		files, _ := os.ReadDir(dir)
@@ -56,8 +51,14 @@ func (b *Blog) processDirs(dirCh chan<- bool) {
 
 			mdFilepath := filepath.Join(srcDir, file.Name())
 
-			// https://danishpraka.sh/posts/slug/
+			// https://danishpraka.sh/posts/slug
+			// https://danishpraka.sh/2019-12-7-using-makefiles-for-go
+			// 		=> https://danishpraka.sh/using-makefiles-for-go
+			//
+			//^[0-9]*-[0-9]*-[0-9]*-(.*)
 			slug := strings.TrimSuffix(filepath.Base(file.Name()), filepath.Ext(file.Name()))
+			var re = regexp.MustCompile(`^[0-9]*-[0-9]*-[0-9]*-`)
+			slug = re.ReplaceAllString(slug, "")
 			os.MkdirAll(filepath.Join(dstDir, slug), 0755)
 			htmlFile := filepath.Join(dstDir, slug, "index.html")
 
@@ -67,31 +68,37 @@ func (b *Blog) processDirs(dirCh chan<- bool) {
 				continue
 			}
 
-			err := page.RenderHTML(md.MarkdownToHTML(mdFilepath), htmlFile)
+			htmlBody := md.MarkdownToHTML(page.MDBody)
+			data := struct {
+				FM   map[string]interface{}
+				Body string
+			}{page.FM, string(htmlBody)}
+			err := page.RenderHTML(htmlFile, data)
 			if err != nil {
 				logrus.Errorf("processDir: %+v", err)
 			}
 
+			// we only need to populate Posts if
+			// we're dealing with posts, for all other
+			// directories (books for now), we're done
+			if filepath.Base(srcDir) != "posts" {
+				continue
+			}
+
 			// TODO: sort posts by date
 			// Parse frontmatter from the post (title, date)
-			// fmt.Println(file.Name(), fm["title"])
 			var title string
 			if page.FM["title"] != nil {
 				title = fmt.Sprintf("%v", page.FM["title"])
 			}
-			b.Posts = append(b.Posts, Post{
+			posts = append(posts, Post{
 				Slug:        slug,
 				Title:       title,
 				Frontmatter: page.FM,
-				Body:        md.MarkdownToHTML(mdFilepath),
+				Date:        page.FM["date"].(string),
+				Body:        md.MarkdownToHTML(page.MDBody),
+				URL:         fmt.Sprintf("/posts/%s", slug),
 			})
-		}
-
-		// I prefer showing posts on the homepage
-		// so this won't work or there would be redundancy
-		// to retain posts on home, have to handle it separately
-		if filepath.Base(srcDir) == "posts" {
-			continue
 		}
 
 		// parse index pages for
@@ -101,13 +108,28 @@ func (b *Blog) processDirs(dirCh chan<- bool) {
 		indexHTML := filepath.Join(dstDir, "index.html")
 		indexMDFilepath := filepath.Join(srcDir, "index.md")
 
+		// I prefer showing posts on the homepage
+		// so this won't work or there would be redundancy
+		// to retain posts on home, have to handle it separately
+		//    build/posts/index.md => build/index.md
+		if filepath.Base(srcDir) == "posts" {
+			indexHTML = filepath.Join(filepath.Clean(filepath.Join(dstDir, "..")), "index.html")
+			indexMDFilepath = filepath.Join(filepath.Clean(filepath.Join(srcDir, "..")), "index.md")
+		}
+
 		page := md.Page{}
 		if err := page.ParseFrontmatter(indexMDFilepath); err != nil {
 			logrus.Errorf("processDir: failed for file %s: %+v", srcDir, err)
 			continue
 		}
 
-		err := page.RenderHTML(md.MarkdownToHTML(indexMDFilepath), indexHTML)
+		htmlBody := md.MarkdownToHTML(page.MDBody)
+		data := struct {
+			FM    map[string]interface{}
+			Body  string
+			Posts []Post
+		}{page.FM, string(htmlBody), posts}
+		err := page.RenderHTML(indexHTML, data)
 		if err != nil {
 			logrus.Errorf("processDir: %+v", err)
 		}
@@ -124,24 +146,29 @@ func (p *Blog) processFiles(dirCh <-chan bool) error {
 
 		var htmlFile string
 		if file == "index.md" {
-			// pages/index.md => build/index.html (root)
-			htmlFile = filepath.Join(BUILD_DIR, "index.html")
+			// this is handled in processDirs
+			// reasoning given there as well
+			continue
 		} else {
 			// pages/about.md => build/about/index.html
-			htmlDir := filepath.Join(BUILD_DIR, strings.TrimSuffix(file, ".md"))
+			htmlDir := filepath.Join(cnst.BUILD_DIR, strings.TrimSuffix(file, ".md"))
 			os.Mkdir(htmlDir, 0755)
 			htmlFile = filepath.Join(htmlDir, "index.html")
 		}
 
-		mdFilepath := filepath.Join(DIR, file)
-		htmlBody := md.MarkdownToHTML(mdFilepath)
-
+		mdFilepath := filepath.Join(cnst.DIR, file)
 		page := md.Page{}
 		if err := page.ParseFrontmatter(mdFilepath); err != nil {
 			logrus.Errorf("processDir: failed for file %s: %+v", htmlFile, err)
 		}
 
-		err := page.RenderHTML(htmlBody, htmlFile)
+		htmlBody := md.MarkdownToHTML(page.MDBody)
+
+		data := struct {
+			FM   map[string]interface{}
+			Body string
+		}{page.FM, string(htmlBody)}
+		err := page.RenderHTML(htmlFile, data)
 		if err != nil {
 			logrus.Errorf("processDir: %+v", err)
 		}
@@ -161,9 +188,9 @@ func Build() {
 }
 
 func (b *Blog) process() error {
-	buildStaticDir := filepath.Join(BUILD_DIR, "static")
+	buildStaticDir := filepath.Join(cnst.BUILD_DIR, "static")
 	os.Mkdir(buildStaticDir, 0755)
-	if err := utils.CopyDir(STATIC, buildStaticDir); err != nil {
+	if err := utils.CopyDir(cnst.STATIC, buildStaticDir); err != nil {
 		fmt.Printf("error copying static directory: %+v", err)
 		os.Exit(1)
 	}
@@ -182,10 +209,8 @@ func (b *Blog) process() error {
 	}
 
 	dirCh := make(chan bool, 1)
-
 	b.processDirs(dirCh)
 	b.processFiles(dirCh)
-
 	close(dirCh)
 
 	return nil
@@ -199,6 +224,6 @@ func clearIfDirExists(dir string) {
 }
 
 func setup() {
-	clearIfDirExists(BUILD_DIR)
-	os.Mkdir(BUILD_DIR, 0755)
+	clearIfDirExists(cnst.BUILD_DIR)
+	os.Mkdir(cnst.BUILD_DIR, 0755)
 }
