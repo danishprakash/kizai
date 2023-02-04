@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	cnst "github.com/danishprakash/kizai/constants"
 	md "github.com/danishprakash/kizai/markdown"
@@ -26,7 +28,7 @@ type Blog struct {
 type Post struct {
 	Title       string
 	Slug        string
-	Date        string
+	Date        time.Time
 	Frontmatter map[string]interface{}
 	Body        []byte
 	URL         string
@@ -68,11 +70,18 @@ func (b *Blog) processDirs(dirCh chan<- bool) {
 				continue
 			}
 
+			// parse date if present
+			var date time.Time
+			if page.FM["date"] != nil {
+				date, _ = time.Parse("2006-01-02", page.FM["date"].(string))
+			}
+
 			htmlBody := md.MarkdownToHTML(page.MDBody)
 			data := struct {
 				FM   map[string]interface{}
 				Body string
-			}{page.FM, string(htmlBody)}
+				Date time.Time
+			}{page.FM, string(htmlBody), date}
 			err := page.RenderHTML(htmlFile, data)
 			if err != nil {
 				logrus.Errorf("processDir: %+v", err)
@@ -95,7 +104,7 @@ func (b *Blog) processDirs(dirCh chan<- bool) {
 				Slug:        slug,
 				Title:       title,
 				Frontmatter: page.FM,
-				Date:        page.FM["date"].(string),
+				Date:        date,
 				Body:        md.MarkdownToHTML(page.MDBody),
 				URL:         fmt.Sprintf("/posts/%s", slug),
 			})
@@ -122,6 +131,11 @@ func (b *Blog) processDirs(dirCh chan<- bool) {
 			logrus.Errorf("processDir: failed for file %s: %+v", srcDir, err)
 			continue
 		}
+
+		// sort posts
+		sort.Slice(posts, func(i, j int) bool {
+			return posts[j].Date.Before(posts[i].Date)
+		})
 
 		htmlBody := md.MarkdownToHTML(page.MDBody)
 		data := struct {
