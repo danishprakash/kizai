@@ -151,9 +151,16 @@ func (b *Blog) processDirs() {
 
 func (p *Blog) processFiles() error {
 	for _, file := range p.Files {
-		// TODO: rm this
+		// copy non-content files over to
+		// build/ such as favicon
 		if filepath.Ext(file) != ".md" {
+			src := filepath.Join(cnst.DIR, file)
+			dst := filepath.Join(cnst.BUILD_DIR, file)
+			if err := utils.CopyFile(src, dst); err != nil {
+				return err
+			}
 			continue
+
 		}
 
 		var htmlFile string
