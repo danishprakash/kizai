@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -53,14 +52,13 @@ func (b *Blog) processDirs() {
 
 			mdFilepath := filepath.Join(srcDir, file.Name())
 
+			// OLD:
 			// https://danishpraka.sh/posts/slug
 			// https://danishpraka.sh/2019-12-7-using-makefiles-for-go
 			// 		=> https://danishpraka.sh/using-makefiles-for-go
 			//
 			//^[0-9]*-[0-9]*-[0-9]*-(.*)
 			slug := strings.TrimSuffix(filepath.Base(file.Name()), filepath.Ext(file.Name()))
-			var re = regexp.MustCompile(`^[0-9]*-[0-9]*-[0-9]*-`)
-			slug = re.ReplaceAllString(slug, "")
 			os.MkdirAll(filepath.Join(dstDir, slug), 0755)
 			htmlFile := filepath.Join(dstDir, slug, "index.html")
 

@@ -15,3 +15,4 @@ TODO:
 - [x] sort the posts
 - [x] add date formatting func and fix dates on post and home
 - [x] serve and rebuild dir (dev)
+- [ ] warn for similar posts/routes while building/serving
