@@ -35,7 +35,7 @@ type Post struct {
 }
 
 // handle posts/
-func (b *Blog) processDirs(dirCh chan<- bool) {
+func (b *Blog) processDirs() {
 	for _, dir := range b.Dirs {
 		srcDir := filepath.Join(cnst.DIR, dir)
 		dstDir := filepath.Join(cnst.BUILD_DIR, dir)
@@ -44,7 +44,7 @@ func (b *Blog) processDirs(dirCh chan<- bool) {
 		var posts []Post
 
 		// iterate over all the posts
-		files, _ := os.ReadDir(dir)
+		files, _ := os.ReadDir(srcDir)
 		for _, file := range files {
 			fn := file.Name()
 			if filepath.Ext(fn) != ".md" {
@@ -151,10 +151,10 @@ func (b *Blog) processDirs(dirCh chan<- bool) {
 	}
 }
 
-func (p *Blog) processFiles(dirCh <-chan bool) error {
+func (p *Blog) processFiles() error {
 	for _, file := range p.Files {
 		// TODO: rm this
-		if filepath.Ext(file) != ".md" || strings.Contains(filepath.Base(file), "readme") {
+		if filepath.Ext(file) != ".md" {
 			continue
 		}
 
@@ -193,7 +193,6 @@ func (p *Blog) processFiles(dirCh <-chan bool) error {
 
 func Build() {
 	logrus.SetReportCaller(true)
-	chdir()
 	setup()
 	blog := &Blog{}
 	if err := blog.process(); err != nil {
@@ -208,13 +207,12 @@ func (b *Blog) process() error {
 		fmt.Printf("error copying static directory: %+v", err)
 		os.Exit(1)
 	}
-	files, err := os.ReadDir(".")
+	files, err := os.ReadDir(cnst.DIR)
 	if err != nil {
 		return err
 	}
 
 	for _, f := range files {
-		fmt.Printf("process: %s\n", f.Name())
 		if f.IsDir() {
 			b.Dirs = append(b.Dirs, f.Name())
 		} else {
@@ -222,10 +220,8 @@ func (b *Blog) process() error {
 		}
 	}
 
-	dirCh := make(chan bool, 1)
-	b.processDirs(dirCh)
-	b.processFiles(dirCh)
-	close(dirCh)
+	b.processDirs()
+	b.processFiles()
 
 	return nil
 }

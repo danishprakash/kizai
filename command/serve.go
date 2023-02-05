@@ -45,8 +45,13 @@ func watch() {
 	}()
 
 	// Add a path.
+	// TODO: fsnotify doesn't support
+	// recursive watch, walk over the dirs
+	// and watch them
 	err = watcher.Add(cnst.DIR)
+	err = watcher.Add(cnst.DIR + "/posts")
 	err = watcher.Add(cnst.STATIC)
+	err = watcher.Add(cnst.STATIC + "/css")
 	err = watcher.Add(cnst.TEMPLATES)
 	if err != nil {
 		log.Fatal(err)
