@@ -50,6 +50,7 @@ func watch() {
 	// and watch them
 	err = watcher.Add(cnst.DIR)
 	err = watcher.Add(cnst.DIR + "/posts")
+	err = watcher.Add(cnst.DIR + "/reading")
 	err = watcher.Add(cnst.STATIC)
 	err = watcher.Add(cnst.STATIC + "/css")
 	err = watcher.Add(cnst.TEMPLATES)
