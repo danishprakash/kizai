@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"github.com/danishprakash/kizai/markdown"
 	md "github.com/danishprakash/kizai/markdown"
 	"github.com/danishprakash/kizai/utils"
+	"gopkg.in/yaml.v2"
 
 	"github.com/sirupsen/logrus"
 )
@@ -21,19 +23,43 @@ type Blog struct {
 	Dirs  []string
 }
 
+var (
+	meta = md.Meta{}
+)
+
+func initMeta() {
+	data, err := os.ReadFile("meta.yml")
+	if err != nil {
+		log.Fatalf("Error reading file: %v", err)
+	}
+
+	err = yaml.Unmarshal(data, &meta)
+	if err != nil {
+		log.Fatalf("Error parsing YAML: %v", err)
+	}
+}
+
 // processHome sets up the homepage enlisting all the posts
-func processHome(posts []*md.Post) {
+func processHome(dir string, posts []*md.Post) {
 	// sort posts
 	sort.Slice(posts, func(i, j int) bool {
 		return posts[j].Date.Before(posts[i].Date)
 	})
 
 	page := md.Page{
+		Meta:  meta,
 		Posts: posts,
 	}
 
-	htmlFilepath := filepath.Join(cnst.BUILD_DIR, "index.html")
-	mdFilepath := filepath.Join(cnst.DIR, "index.md")
+	var htmlFilepath, mdFilepath string
+	if dir == "posts" {
+		htmlFilepath = filepath.Join(cnst.BUILD_DIR, "index.html")
+		mdFilepath = filepath.Join(cnst.DIR, "index.md")
+	} else if dir == "feed" {
+		htmlFilepath = filepath.Join(cnst.BUILD_DIR, "feed.xml")
+		mdFilepath = filepath.Join(cnst.DIR, dir, "feed.md")
+	}
+
 	if err := page.ParseMarkdown(mdFilepath); err != nil {
 		logrus.Errorf("processDir: failed for file %s: %+v", mdFilepath, err)
 	}
@@ -48,6 +74,9 @@ func processHome(posts []*md.Post) {
 // processDirs processes the various directories in source dir
 func (b *Blog) processDirs() {
 	for _, dir := range b.Dirs {
+		if dir == "feed" {
+			continue
+		}
 		var posts []*markdown.Post
 		srcDir := filepath.Join(cnst.DIR, dir)
 
@@ -56,6 +85,9 @@ func (b *Blog) processDirs() {
 		files, _ := os.ReadDir(srcDir)
 		for _, file := range files {
 			post, _ := processPage(file.Name(), dir)
+			if post == nil {
+				continue
+			}
 
 			// if we're processing /posts directory store
 			// the posts so that we can use this information
@@ -73,7 +105,11 @@ func (b *Blog) processDirs() {
 		// to show all the posts on the homepage instead
 		// of a separate /blog page.
 		if dir == "posts" {
-			processHome(posts)
+			processHome("posts", posts)
+
+			// While we're at it and have all the
+			// post-related info, generate RSS feed
+			processHome("feed", posts)
 		}
 	}
 }
@@ -112,22 +148,25 @@ func processPage(file, dir string) (*markdown.Post, error) {
 	}
 	os.MkdirAll(htmlDir, 0755)
 
-	page := md.Page{}
+	page := md.Page{
+		Meta: meta,
+	}
 	if err := page.ParseMarkdown(mdFilepath); err != nil {
 		logrus.Errorf("processDir: failed for file %s: %+v", htmlFile, err)
 	}
 
+	page.Body = md.MarkdownToHTML(page.Markdown)
 	page.Post = &md.Post{
 		Slug:        slug,
 		Frontmatter: page.Frontmatter,
 		URL:         fmt.Sprintf("/posts/%s", slug),
+		Body:        utils.XMLReadyString(page.Body),
 	}
-	page.Body = md.MarkdownToHTML(page.Markdown)
 	if page.Frontmatter["date"] != nil {
 		page.Post.Date, _ = time.Parse("2006-01-02", page.Frontmatter["date"].(string))
 	}
 	if page.Frontmatter["title"] != nil {
-		page.Post.Title = fmt.Sprintf("%v", page.Frontmatter["title"])
+		page.Post.Title = utils.XMLReadyString(fmt.Sprintf("%v", page.Frontmatter["title"]))
 	}
 
 	err := page.RenderHTML(htmlFile)
@@ -168,6 +207,8 @@ func (b *Blog) process() error {
 	if err != nil {
 		return err
 	}
+
+	initMeta()
 
 	for _, f := range files {
 		if f.IsDir() {

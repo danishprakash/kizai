@@ -15,8 +15,9 @@ import (
 )
 
 type Meta struct {
-	Author string
-	URL    string
+	Name  string `yaml:"name"`
+	URL   string `yaml:"url"`
+	Title string `yaml:"title"`
 }
 
 // Page stores an information for a page
@@ -74,7 +75,6 @@ func MarkdownToHTML(md string) string {
 
 // renders final HTML via templates
 func (p *Page) RenderHTML(htmlFile string) error {
-	// fmt.Printf("%#v\n", p)
 	t, err := template.Load(cnst.TEMPLATES)
 	if err != nil {
 		logrus.Errorf("RenderHTML: %+v", err)
@@ -94,10 +94,9 @@ func (p *Page) RenderHTML(htmlFile string) error {
 		p.Frontmatter["layout"] = "post"
 	}
 
-	// fmt.Printf("frontmatter: %#v", p.Frontmatter)
 	tmplName := fmt.Sprintf("%s.html", p.Frontmatter["layout"])
 	if err := t.ExecuteTemplate(f, tmplName, p); err != nil {
-		fmt.Println("failed to execute template ", err)
+		logrus.Errorf("failed to execute template %w", err)
 		return err
 	}
 
