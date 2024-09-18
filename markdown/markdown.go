@@ -3,6 +3,7 @@ package markdown
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/adrg/frontmatter"
 	cnst "github.com/danishprakash/kizai/constants"
@@ -13,40 +14,45 @@ import (
 	"github.com/gomarkdown/markdown/html"
 )
 
-type Page struct {
-	FM     map[string]interface{}
-	Body   string
-	MDBody string
+type Meta struct {
+	Name  string `yaml:"name"`
+	URL   string `yaml:"url"`
+	Title string `yaml:"title"`
 }
 
-// func (p *Page) ParseFrontmatter(file string) error {
-// 	// parse frontmatter and body from md file
-// 	m := front.NewMatter()
-// 	m.Handle("---", front.YAMLHandler)
-// 	fl, err := os.Open(file)
-// 	fm, md, err := m.Parse(fl)
-// 	if err != nil {
-// 		// logrus.Errorf("err: %+v", err)
-// 		return err
-// 	}
+// Page stores an information for a page
+// It could be /about, or /pages/* or even /
+type Page struct {
+	Frontmatter map[string]interface{}
+	Meta
+	Markdown string
+	Body     string
+	Post     *Post
+	Posts    []*Post
+}
 
-// 	p.FM = fm
-// 	p.MDBody = md
+type Post struct {
+	Title       string
+	Slug        string
+	Date        time.Time
+	Frontmatter map[string]interface{}
+	Body        string
+	URL         string
+}
 
-// 	return nil
-// }
-
-func (p *Page) ParseFrontmatter(file string) error {
+// ParseMarkdown parse a markdown file into frontmatter and body
+func (p *Page) ParseMarkdown(file string) error {
 	fl, err := os.Open(file)
 	if err != nil {
 		panic(err)
 	}
 
-	md, err := frontmatter.Parse(fl, &p.FM)
+	md, err := frontmatter.Parse(fl, &p.Frontmatter)
 	if err != nil {
 		return err
 	}
-	p.MDBody = string(md)
+
+	p.Markdown = string(md)
 	return nil
 }
 
@@ -60,15 +66,15 @@ func Readfile(filepath string) []byte {
 	return d
 }
 
-func MarkdownToHTML(mdBody string) []byte {
+func MarkdownToHTML(md string) string {
 	htmlFlags := html.CommonFlags | html.HrefTargetBlank
 	opts := html.RendererOptions{Flags: htmlFlags}
 	renderer := html.NewRenderer(opts)
-	return markdown.ToHTML([]byte(mdBody), nil, renderer)
+	return string(markdown.ToHTML([]byte(md), nil, renderer))
 }
 
 // renders final HTML via templates
-func (p *Page) RenderHTML(htmlFile string, data interface{}) error {
+func (p *Page) RenderHTML(htmlFile string) error {
 	t, err := template.Load(cnst.TEMPLATES)
 	if err != nil {
 		logrus.Errorf("RenderHTML: %+v", err)
@@ -80,17 +86,17 @@ func (p *Page) RenderHTML(htmlFile string, data interface{}) error {
 	//    build/post/slug/index.html
 	f, err := os.Create(htmlFile)
 	if err != nil {
-		fmt.Println("failed to create file", err)
+		return fmt.Errorf("failed to create file", err)
 	}
 
 	// set post.html as default template
-	if p.FM["layout"] == "" {
-		p.FM["layout"] = "post"
+	if p.Frontmatter["layout"] == "" {
+		p.Frontmatter["layout"] = "post"
 	}
 
-	tmplName := fmt.Sprintf("%s.html", p.FM["layout"])
-	if err := t.ExecuteTemplate(f, tmplName, data); err != nil {
-		fmt.Println("failed to execute template ", err)
+	tmplName := fmt.Sprintf("%s.html", p.Frontmatter["layout"])
+	if err := t.ExecuteTemplate(f, tmplName, p); err != nil {
+		logrus.Errorf("failed to execute template %w", err)
 		return err
 	}
 

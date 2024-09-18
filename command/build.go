@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -9,189 +10,176 @@ import (
 	"time"
 
 	cnst "github.com/danishprakash/kizai/constants"
+	"github.com/danishprakash/kizai/markdown"
 	md "github.com/danishprakash/kizai/markdown"
 	"github.com/danishprakash/kizai/utils"
+	"gopkg.in/yaml.v2"
 
 	"github.com/sirupsen/logrus"
 )
-
-func chdir() {
-	_ = os.Chdir(cnst.DIR)
-}
 
 type Blog struct {
 	Files []string
 	Dirs  []string
 }
 
-type Post struct {
-	Title       string
-	Slug        string
-	Date        time.Time
-	Frontmatter map[string]interface{}
-	Body        []byte
-	URL         string
+var (
+	meta = md.Meta{}
+)
+
+func initMeta() {
+	data, err := os.ReadFile("meta.yml")
+	if err != nil {
+		log.Fatalf("Error reading file: %v", err)
+	}
+
+	err = yaml.Unmarshal(data, &meta)
+	if err != nil {
+		log.Fatalf("Error parsing YAML: %v", err)
+	}
 }
 
-// handle posts/
+// processHome sets up the homepage enlisting all the posts
+func processHome(dir string, posts []*md.Post) {
+	// sort posts
+	sort.Slice(posts, func(i, j int) bool {
+		return posts[j].Date.Before(posts[i].Date)
+	})
+
+	page := md.Page{
+		Meta:  meta,
+		Posts: posts,
+	}
+
+	var htmlFilepath, mdFilepath string
+	if dir == "posts" {
+		htmlFilepath = filepath.Join(cnst.BUILD_DIR, "index.html")
+		mdFilepath = filepath.Join(cnst.DIR, "index.md")
+	} else if dir == "feed" {
+		htmlFilepath = filepath.Join(cnst.BUILD_DIR, "feed.xml")
+		mdFilepath = filepath.Join(cnst.DIR, dir, "feed.md")
+	}
+
+	if err := page.ParseMarkdown(mdFilepath); err != nil {
+		logrus.Errorf("processDir: failed for file %s: %+v", mdFilepath, err)
+	}
+
+	page.Body = md.MarkdownToHTML(page.Markdown)
+	err := page.RenderHTML(htmlFilepath)
+	if err != nil {
+		logrus.Errorf("processDir: %+v", err)
+	}
+}
+
+// processDirs processes the various directories in source dir
 func (b *Blog) processDirs() {
 	for _, dir := range b.Dirs {
+		if dir == "feed" {
+			continue
+		}
+		var posts []*markdown.Post
 		srcDir := filepath.Join(cnst.DIR, dir)
-		dstDir := filepath.Join(cnst.BUILD_DIR, dir)
-		os.Mkdir(dstDir, 0755)
 
-		var posts []Post
-
-		// iterate over all the posts
+		// iterate over all items in the directory
+		// (i.e. /posts/* or /reading/*)
 		files, _ := os.ReadDir(srcDir)
 		for _, file := range files {
-			fn := file.Name()
-			if filepath.Ext(fn) != ".md" {
+			post, _ := processPage(file.Name(), dir)
+			if post == nil {
 				continue
 			}
 
-			mdFilepath := filepath.Join(srcDir, file.Name())
-
-			// OLD:
-			// https://danishpraka.sh/posts/slug
-			// https://danishpraka.sh/2019-12-7-using-makefiles-for-go
-			// 		=> https://danishpraka.sh/using-makefiles-for-go
-			//
-			//^[0-9]*-[0-9]*-[0-9]*-(.*)
-			slug := strings.TrimSuffix(filepath.Base(file.Name()), filepath.Ext(file.Name()))
-			os.MkdirAll(filepath.Join(dstDir, slug), 0755)
-			htmlFile := filepath.Join(dstDir, slug, "index.html")
-
-			page := md.Page{}
-			if err := page.ParseFrontmatter(mdFilepath); err != nil {
-				logrus.Errorf("processDir: %+v", err)
-				continue
+			// if we're processing /posts directory store
+			// the posts so that we can use this information
+			// to set up homepage, no need to independently
+			// iterate over this directory again for the
+			// purposes of fetching post titles and dates
+			if dir == "posts" {
+				posts = append(posts, post)
 			}
-
-			// parse date if present
-			var date time.Time
-			if page.FM["date"] != nil {
-				date, _ = time.Parse("2006-01-02", page.FM["date"].(string))
-			}
-
-			htmlBody := md.MarkdownToHTML(page.MDBody)
-			data := struct {
-				FM   map[string]interface{}
-				Body string
-				Date time.Time
-			}{page.FM, string(htmlBody), date}
-			err := page.RenderHTML(htmlFile, data)
-			if err != nil {
-				logrus.Errorf("processDir: %+v", err)
-			}
-
-			// we only need to populate Posts if
-			// we're dealing with posts, for all other
-			// directories (books for now), we're done
-			if filepath.Base(srcDir) != "posts" {
-				continue
-			}
-
-			// TODO: sort posts by date
-			// Parse frontmatter from the post (title, date)
-			var title string
-			if page.FM["title"] != nil {
-				title = fmt.Sprintf("%v", page.FM["title"])
-			}
-			posts = append(posts, Post{
-				Slug:        slug,
-				Title:       title,
-				Frontmatter: page.FM,
-				Date:        date,
-				Body:        md.MarkdownToHTML(page.MDBody),
-				URL:         fmt.Sprintf("/posts/%s", slug),
-			})
 		}
 
+		// Once we've iterated through all the posts
+		// use this information (namely title and date)
+		// to also render the home page because we prefer
+		// to show all the posts on the homepage instead
+		// of a separate /blog page.
+		if dir == "posts" {
+			processHome("posts", posts)
+
+			// While we're at it and have all the
+			// post-related info, generate RSS feed
+			processHome("feed", posts)
+		}
+	}
+}
+
+func processPage(file, dir string) (*markdown.Post, error) {
+	// copy non-source files over to
+	// build/ such as favicon
+	if filepath.Ext(file) != ".md" {
+		src := filepath.Join(cnst.DIR, file)
+		dst := filepath.Join(cnst.BUILD_DIR, file)
+		if err := utils.CopyFile(src, dst); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
+	srcDir := filepath.Join(cnst.DIR, dir)
+	dstDir := filepath.Join(cnst.BUILD_DIR, dir)
+
+	var htmlFile, htmlDir, mdFilepath, slug string
+	mdFilepath = filepath.Join(srcDir, file)
+	if file == "index.md" {
 		// parse index pages for
 		// directories within pages:
 		//     build/books/index.html
 		//     build/posts/index.html
-		indexHTML := filepath.Join(dstDir, "index.html")
-		indexMDFilepath := filepath.Join(srcDir, "index.md")
-
-		// I prefer showing posts on the homepage
-		// so this won't work or there would be redundancy
-		// to retain posts on home, have to handle it separately
-		//    build/posts/index.md => build/index.md
-		if filepath.Base(srcDir) == "posts" {
-			indexHTML = filepath.Join(filepath.Clean(filepath.Join(dstDir, "..")), "index.html")
-			indexMDFilepath = filepath.Join(filepath.Clean(filepath.Join(srcDir, "..")), "index.md")
-		}
-
-		page := md.Page{}
-		if err := page.ParseFrontmatter(indexMDFilepath); err != nil {
-			logrus.Errorf("processDir: failed for file %s: %+v", srcDir, err)
-			continue
-		}
-
-		// sort posts
-		sort.Slice(posts, func(i, j int) bool {
-			return posts[j].Date.Before(posts[i].Date)
-		})
-
-		htmlBody := md.MarkdownToHTML(page.MDBody)
-		data := struct {
-			FM    map[string]interface{}
-			Body  string
-			Posts []Post
-		}{page.FM, string(htmlBody), posts}
-		err := page.RenderHTML(indexHTML, data)
-		if err != nil {
-			logrus.Errorf("processDir: %+v", err)
-		}
-
+		htmlDir = filepath.Join(dstDir, dir)
+		htmlFile = filepath.Join(dstDir, "index.html")
+		mdFilepath = filepath.Join(srcDir, "index.md")
+	} else {
+		// /pages/about.md => build/about/index.html
+		// /pages/posts/makefiles-for-go.md => build/posts/makefiles-for-go/index.html
+		slug = strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+		htmlDir = filepath.Join(dstDir, slug)
+		htmlFile = filepath.Join(htmlDir, "index.html")
 	}
+	os.MkdirAll(htmlDir, 0755)
+
+	page := md.Page{
+		Meta: meta,
+	}
+	if err := page.ParseMarkdown(mdFilepath); err != nil {
+		logrus.Errorf("processDir: failed for file %s: %+v", htmlFile, err)
+	}
+
+	page.Body = md.MarkdownToHTML(page.Markdown)
+	page.Post = &md.Post{
+		Slug:        slug,
+		Frontmatter: page.Frontmatter,
+		URL:         fmt.Sprintf("/posts/%s", slug),
+		Body:        utils.XMLReadyString(page.Body),
+	}
+	if page.Frontmatter["date"] != nil {
+		page.Post.Date, _ = time.Parse("2006-01-02", page.Frontmatter["date"].(string))
+	}
+	if page.Frontmatter["title"] != nil {
+		page.Post.Title = utils.XMLReadyString(fmt.Sprintf("%v", page.Frontmatter["title"]))
+	}
+
+	err := page.RenderHTML(htmlFile)
+	if err != nil {
+		logrus.Errorf("processDir: %+v", err)
+	}
+
+	return page.Post, nil
 }
 
 func (p *Blog) processFiles() error {
 	for _, file := range p.Files {
-		// copy non-content files over to
-		// build/ such as favicon
-		if filepath.Ext(file) != ".md" {
-			src := filepath.Join(cnst.DIR, file)
-			dst := filepath.Join(cnst.BUILD_DIR, file)
-			if err := utils.CopyFile(src, dst); err != nil {
-				return err
-			}
-			continue
-
-		}
-
-		var htmlFile string
-		if file == "index.md" {
-			// this is handled in processDirs
-			// reasoning given there as well
-			continue
-		} else {
-			// pages/about.md => build/about/index.html
-			htmlDir := filepath.Join(cnst.BUILD_DIR, strings.TrimSuffix(file, ".md"))
-			os.Mkdir(htmlDir, 0755)
-			htmlFile = filepath.Join(htmlDir, "index.html")
-		}
-
-		mdFilepath := filepath.Join(cnst.DIR, file)
-		page := md.Page{}
-		if err := page.ParseFrontmatter(mdFilepath); err != nil {
-			logrus.Errorf("processDir: failed for file %s: %+v", htmlFile, err)
-		}
-
-		htmlBody := md.MarkdownToHTML(page.MDBody)
-
-		data := struct {
-			FM   map[string]interface{}
-			Body string
-		}{page.FM, string(htmlBody)}
-		err := page.RenderHTML(htmlFile, data)
-		if err != nil {
-			logrus.Errorf("processDir: %+v", err)
-		}
-
+		processPage(file, "")
 	}
 	return nil
 }
@@ -207,7 +195,10 @@ func Build() {
 
 func (b *Blog) process() error {
 	buildStaticDir := filepath.Join(cnst.BUILD_DIR, "static")
-	os.Mkdir(buildStaticDir, 0755)
+	if err := os.MkdirAll(buildStaticDir, 0755); err != nil {
+		fmt.Printf("error creating %s directory: %+v", buildStaticDir, err)
+		os.Exit(1)
+	}
 	if err := utils.CopyDir(cnst.STATIC, buildStaticDir); err != nil {
 		fmt.Printf("error copying static directory: %+v", err)
 		os.Exit(1)
@@ -217,6 +208,8 @@ func (b *Blog) process() error {
 		return err
 	}
 
+	initMeta()
+
 	for _, f := range files {
 		if f.IsDir() {
 			b.Dirs = append(b.Dirs, f.Name())
@@ -225,8 +218,8 @@ func (b *Blog) process() error {
 		}
 	}
 
-	b.processDirs()
 	b.processFiles()
+	b.processDirs()
 
 	return nil
 }
