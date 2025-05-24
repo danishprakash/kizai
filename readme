@@ -1,20 +1,46 @@
 kizai
 =====
 
-minimal static site generator
+a minimal static site generator.
 
-TODO:
-- [x] fix mobile view
-- [x] rename posts to avoid slug manipulation in the code
-- [x] fix image paths in posts (vim arglist ftw)
-- [x] fix the css (URL underline)
-- [x] syntax highlighting
-- [x] books with no page show broken html syntax
-- [ ] walk over dirs and watch them
-- [x] fix homepage (show posts)
-- [x] get the syntax to work
-- [x] fix the title not showing up
-- [x] sort the posts
-- [x] add date formatting func and fix dates on post and home
-- [x] serve and rebuild dir (dev)
-- [ ] warn for similar posts/routes while building/serving
+usage
+-----
+
+    kizai build
+
+builds the current project.
+
+    kizai serve
+
+serves the current project.
+
+structure
+---------
+
+    .
+    ├── meta.yml
+    ├── static/
+    ├── posts/
+    ├── pages/
+    └── template/
+
+- `meta.yml`: site metadata
+- `static/`: static assets
+- `posts/`: blog posts
+- `pages/`: static pages
+- `template/`: html templates
+
+features
+--------
+
+- markdown support
+- syntax highlighting
+- RSS feed generation
+- photo galleries
+- automatic post sorting by date
+- development server with live reload
+
+license
+-------
+
+MIT
