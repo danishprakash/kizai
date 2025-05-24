@@ -155,12 +155,23 @@ func processPage(file, dir string) (*markdown.Post, error) {
 		logrus.Errorf("processDir: failed for file %s: %+v", htmlFile, err)
 	}
 
+	// Parse the images
+	var images []string
+	var err error
+	if page.Frontmatter["layout"] == "photos" {
+		images, err = ParseImagesFromFrontmatter(page.Frontmatter)
+		if err != nil {
+			logrus.Errorf("failed to parse images: %+v", err)
+			images = []string{}
+		}
+	}
 	page.Body = md.MarkdownToHTML(page.Markdown)
 	page.Post = &md.Post{
 		Slug:        slug,
 		Frontmatter: page.Frontmatter,
 		URL:         fmt.Sprintf("/posts/%s", slug),
 		Body:        utils.XMLReadyString(page.Body),
+		Images:      images,
 	}
 	if page.Frontmatter["date"] != nil {
 		page.Post.Date, _ = time.Parse("2006-01-02", page.Frontmatter["date"].(string))
@@ -169,7 +180,7 @@ func processPage(file, dir string) (*markdown.Post, error) {
 		page.Post.Title = utils.XMLReadyString(fmt.Sprintf("%v", page.Frontmatter["title"]))
 	}
 
-	err := page.RenderHTML(htmlFile)
+	err = page.RenderHTML(htmlFile)
 	if err != nil {
 		logrus.Errorf("processDir: %+v", err)
 	}
@@ -234,4 +245,30 @@ func clearIfDirExists(dir string) {
 func setup() {
 	clearIfDirExists(cnst.BUILD_DIR)
 	os.Mkdir(cnst.BUILD_DIR, 0755)
+}
+
+func ParseImagesFromFrontmatter(fm map[string]interface{}) ([]string, error) {
+	// Get the images field from frontmatter
+	imagesInterface, exists := fm["images"]
+	if !exists {
+		return nil, fmt.Errorf("no images field in frontmatter, %+v", fm)
+	}
+
+	// Type assert to []interface{} first (YAML arrays are parsed as []interface{})
+	imagesArray, ok := imagesInterface.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("images field is not an array")
+	}
+
+	// Convert each element to string
+	images := make([]string, len(imagesArray))
+	for i, img := range imagesArray {
+		imgStr, ok := img.(string)
+		if !ok {
+			return nil, fmt.Errorf("image at index %d is not a string", i)
+		}
+		images[i] = imgStr
+	}
+
+	return images, nil
 }
