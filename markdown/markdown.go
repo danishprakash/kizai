@@ -38,6 +38,8 @@ type Post struct {
 	Frontmatter map[string]interface{}
 	Body        string
 	URL         string
+	Tags        []string
+	Images      []string
 }
 
 // ParseMarkdown parse a markdown file into frontmatter and body

@@ -24,7 +24,8 @@ type Blog struct {
 }
 
 var (
-	meta = md.Meta{}
+	meta md.Meta
+	allPosts []*md.Post
 )
 
 func initMeta() {
@@ -97,6 +98,11 @@ func (b *Blog) processDirs() {
 			if dir == "posts" {
 				posts = append(posts, post)
 			}
+			
+			// collect all posts for tag processing
+			if post != nil {
+				allPosts = append(allPosts, post)
+			}
 		}
 
 		// Once we've iterated through all the posts
@@ -156,10 +162,17 @@ func processPage(file, dir string) (*markdown.Post, error) {
 	}
 
 	page.Body = md.MarkdownToHTML(page.Markdown)
+	var url string
+	if dir == "posts" {
+		url = fmt.Sprintf("/posts/%s", slug)
+	} else {
+		url = fmt.Sprintf("/%s/%s", dir, slug)
+	}
+	
 	page.Post = &md.Post{
 		Slug:        slug,
 		Frontmatter: page.Frontmatter,
-		URL:         fmt.Sprintf("/posts/%s", slug),
+		URL:         url,
 		Body:        utils.XMLReadyString(page.Body),
 	}
 	if page.Frontmatter["date"] != nil {
@@ -167,6 +180,24 @@ func processPage(file, dir string) (*markdown.Post, error) {
 	}
 	if page.Frontmatter["title"] != nil {
 		page.Post.Title = utils.XMLReadyString(fmt.Sprintf("%v", page.Frontmatter["title"]))
+	}
+	if page.Frontmatter["tags"] != nil {
+		if tagsList, ok := page.Frontmatter["tags"].([]interface{}); ok {
+			for _, tag := range tagsList {
+				if tagStr, ok := tag.(string); ok {
+					page.Post.Tags = append(page.Post.Tags, tagStr)
+				}
+			}
+		}
+	}
+	if page.Frontmatter["images"] != nil {
+		if imagesList, ok := page.Frontmatter["images"].([]interface{}); ok {
+			for _, img := range imagesList {
+				if imgStr, ok := img.(string); ok {
+					page.Post.Images = append(page.Post.Images, imgStr)
+				}
+			}
+		}
 	}
 
 	err := page.RenderHTML(htmlFile)
@@ -209,6 +240,9 @@ func (b *Blog) process() error {
 	}
 
 	initMeta()
+	
+	// reset allPosts for each build
+	allPosts = []*md.Post{}
 
 	for _, f := range files {
 		if f.IsDir() {
@@ -220,6 +254,9 @@ func (b *Blog) process() error {
 
 	b.processFiles()
 	b.processDirs()
+	
+	// process tags after all content is processed
+	processTags()
 
 	return nil
 }
@@ -228,6 +265,99 @@ func clearIfDirExists(dir string) {
 	err := os.RemoveAll(dir)
 	if err != nil {
 		panic(err)
+	}
+}
+
+func processTags() {
+	// collect unique tags and posts for each tag
+	tagMap := make(map[string][]*md.Post)
+	
+	for _, post := range allPosts {
+		for _, tag := range post.Tags {
+			tagMap[tag] = append(tagMap[tag], post)
+		}
+	}
+	
+	// create /tags directory
+	tagsDir := filepath.Join(cnst.BUILD_DIR, "tags")
+	os.MkdirAll(tagsDir, 0755)
+	
+	// generate page for each tag
+	for tag, posts := range tagMap {
+		tagDir := filepath.Join(tagsDir, tag)
+		os.MkdirAll(tagDir, 0755)
+		
+		// categorize posts by type
+		var regularPosts, photos, books []*md.Post
+		for _, post := range posts {
+			if post.Frontmatter["layout"] == "photos" {
+				photos = append(photos, post)
+			} else if strings.HasPrefix(post.URL, "/reading/") {
+				books = append(books, post)
+			} else {
+				regularPosts = append(regularPosts, post)
+			}
+		}
+		
+		// sort each category by date (newest first)
+		sort.Slice(regularPosts, func(i, j int) bool {
+			return regularPosts[j].Date.Before(regularPosts[i].Date)
+		})
+		sort.Slice(photos, func(i, j int) bool {
+			return photos[j].Date.Before(photos[i].Date)
+		})
+		sort.Slice(books, func(i, j int) bool {
+			return books[j].Date.Before(books[i].Date)
+		})
+		
+		// generate markdown content for categorized posts
+		var markdownContent strings.Builder
+		markdownContent.WriteString(fmt.Sprintf("Found %d items tagged '%s'.\n\n", len(posts), tag))
+		
+		if len(regularPosts) > 0 {
+			markdownContent.WriteString("## Posts\n\n")
+			markdownContent.WriteString("| :--- |\n")
+			for _, post := range regularPosts {
+				markdownContent.WriteString(fmt.Sprintf("| [%s](%s) |\n", post.Title, post.URL))
+			}
+			markdownContent.WriteString("\n")
+		}
+		
+		if len(photos) > 0 {
+			markdownContent.WriteString("## Photos\n\n")
+			markdownContent.WriteString("| :--- |\n")
+			for _, post := range photos {
+				markdownContent.WriteString(fmt.Sprintf("| [%s](%s) |\n", post.Title, post.URL))
+			}
+			markdownContent.WriteString("\n")
+		}
+		
+		if len(books) > 0 {
+			markdownContent.WriteString("## Books\n\n")
+			markdownContent.WriteString("| :--- |\n")
+			for _, post := range books {
+				markdownContent.WriteString(fmt.Sprintf("| [%s](%s) |\n", post.Title, post.URL))
+			}
+		}
+		
+		page := md.Page{
+			Meta:     meta,
+			Markdown: markdownContent.String(),
+			Frontmatter: map[string]interface{}{
+				"layout": "tags",
+				"title":  fmt.Sprintf("Posts tagged with '%s'", tag),
+				"tag":    tag,
+			},
+		}
+		
+		page.Body = md.MarkdownToHTML(markdownContent.String())
+		
+		
+		htmlFile := filepath.Join(tagDir, "index.html")
+		err := page.RenderHTML(htmlFile)
+		if err != nil {
+			logrus.Errorf("processTags: %+v", err)
+		}
 	}
 }
 
