@@ -29,6 +29,7 @@ type Page struct {
 	Body     string
 	Post     *Post
 	Posts    []*Post
+	Yaml     map[string]interface{}
 }
 
 type Post struct {
@@ -54,6 +55,33 @@ func (p *Page) ParseMarkdown(file string) error {
 	}
 
 	p.Markdown = string(md)
+	return nil
+}
+
+// ParseYAML parse a YAML file into frontmatter and YAML data
+func (p *Page) ParseYAML(file string) error {
+	fl, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer fl.Close()
+
+	var yamlData map[string]interface{}
+	md, err := frontmatter.Parse(fl, &yamlData)
+	if err != nil {
+		return err
+	}
+
+	p.Frontmatter = yamlData
+	p.Yaml = yamlData
+
+	// If there's an intro field, use it as markdown
+	if intro, ok := yamlData["intro"].(string); ok {
+		p.Markdown = intro
+	} else {
+		p.Markdown = string(md)
+	}
+
 	return nil
 }
 

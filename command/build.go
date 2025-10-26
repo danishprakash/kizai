@@ -115,9 +115,11 @@ func (b *Blog) processDirs() {
 }
 
 func processPage(file, dir string) (*markdown.Post, error) {
+	ext := filepath.Ext(file)
+
 	// copy non-source files over to
 	// build/ such as favicon
-	if filepath.Ext(file) != ".md" {
+	if ext != ".md" && ext != ".yaml" && ext != ".yml" {
 		src := filepath.Join(cnst.DIR, file)
 		dst := filepath.Join(cnst.BUILD_DIR, file)
 		if err := utils.CopyFile(src, dst); err != nil {
@@ -129,16 +131,17 @@ func processPage(file, dir string) (*markdown.Post, error) {
 	srcDir := filepath.Join(cnst.DIR, dir)
 	dstDir := filepath.Join(cnst.BUILD_DIR, dir)
 
-	var htmlFile, htmlDir, mdFilepath, slug string
-	mdFilepath = filepath.Join(srcDir, file)
-	if file == "index.md" {
+	var htmlFile, htmlDir, srcFilepath, slug string
+	srcFilepath = filepath.Join(srcDir, file)
+	isYAML := ext == ".yaml" || ext == ".yml"
+
+	if file == "index.md" || file == "index.yaml" || file == "index.yml" {
 		// parse index pages for
 		// directories within pages:
 		//     build/books/index.html
 		//     build/posts/index.html
 		htmlDir = filepath.Join(dstDir, dir)
 		htmlFile = filepath.Join(dstDir, "index.html")
-		mdFilepath = filepath.Join(srcDir, "index.md")
 	} else {
 		// /pages/about.md => build/about/index.html
 		// /pages/posts/makefiles-for-go.md => build/posts/makefiles-for-go/index.html
@@ -151,20 +154,29 @@ func processPage(file, dir string) (*markdown.Post, error) {
 	page := md.Page{
 		Meta: meta,
 	}
-	if err := page.ParseMarkdown(mdFilepath); err != nil {
-		logrus.Errorf("processDir: failed for file %s: %+v", htmlFile, err)
+
+	if isYAML {
+		if err := page.ParseYAML(srcFilepath); err != nil {
+			logrus.Errorf("processDir: failed for file %s: %+v", htmlFile, err)
+		}
+	} else {
+		if err := page.ParseMarkdown(srcFilepath); err != nil {
+			logrus.Errorf("processDir: failed for file %s: %+v", htmlFile, err)
+		}
 	}
 
-	// Parse the images
+	// Parse the images (only for individual photo pages, not the photos index)
 	var images []string
 	var err error
-	if page.Frontmatter["layout"] == "photos" {
+	if page.Frontmatter["layout"] == "photo" {
 		images, err = ParseImagesFromFrontmatter(page.Frontmatter)
 		if err != nil {
 			logrus.Errorf("failed to parse images: %+v", err)
 			images = []string{}
 		}
 	}
+
+	// Convert markdown to HTML (works for both .md and .yaml files with intro)
 	page.Body = md.MarkdownToHTML(page.Markdown)
 	page.Post = &md.Post{
 		Slug:        slug,
