@@ -182,7 +182,7 @@ func processPage(file, dir string) (*markdown.Post, error) {
 		Slug:        slug,
 		Frontmatter: page.Frontmatter,
 		URL:         fmt.Sprintf("/posts/%s", slug),
-		Body:        utils.XMLReadyString(page.Body),
+		Body:        page.Body,
 		Images:      images,
 	}
 	if page.Frontmatter["date"] != nil {
