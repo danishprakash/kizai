@@ -30,6 +30,9 @@ type Page struct {
 	Post     *Post
 	Posts    []*Post
 	Yaml     map[string]interface{}
+	// absolute URLs for Open Graph tags
+	OGImage      string
+	CanonicalURL string
 }
 
 type Post struct {

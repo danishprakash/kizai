@@ -12,6 +12,7 @@ import (
 	cnst "github.com/danishprakash/kizai/constants"
 	"github.com/danishprakash/kizai/markdown"
 	md "github.com/danishprakash/kizai/markdown"
+	"github.com/danishprakash/kizai/og"
 	"github.com/danishprakash/kizai/utils"
 	"gopkg.in/yaml.v2"
 
@@ -25,6 +26,10 @@ type Blog struct {
 
 var (
 	meta = md.Meta{}
+
+	ogGen = og.NewGenerator()
+	// photo album slug => cover image, from pages/photos/index.yaml
+	photoCovers = map[string]string{}
 )
 
 func initMeta() {
@@ -47,8 +52,9 @@ func processHome(dir string, posts []*md.Post) {
 	})
 
 	page := md.Page{
-		Meta:  meta,
-		Posts: posts,
+		Meta:         meta,
+		Posts:        posts,
+		CanonicalURL: meta.URL + "/",
 	}
 
 	var htmlFilepath, mdFilepath string
@@ -195,6 +201,11 @@ func processPage(file, dir string) (*markdown.Post, error) {
 		page.Post.Title = utils.XMLReadyString(fmt.Sprintf("%v", page.Frontmatter["title"]))
 	}
 
+	page.CanonicalURL = canonicalURL(htmlFile)
+	if slug != "" {
+		page.OGImage = generateOGImage(ogSource(page.Frontmatter, images, slug, page.Markdown), htmlDir)
+	}
+
 	err = page.RenderHTML(htmlFile)
 	if err != nil {
 		logrus.Errorf("processDir: %+v", err)
@@ -235,6 +246,7 @@ func (b *Blog) process() error {
 	}
 
 	initMeta()
+	photoCovers = loadPhotoCovers(filepath.Join(cnst.DIR, "photos", "index.yaml"))
 
 	for _, f := range files {
 		if f.IsDir() {
