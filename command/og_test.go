@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/danishprakash/kizai/imgsize"
 	"github.com/danishprakash/kizai/og"
 	"github.com/sirupsen/logrus"
 )
@@ -20,6 +21,24 @@ import (
 const testTemplate = `OG={{ .OGImage }}
 URL={{ .CanonicalURL }}
 `
+
+const photosTemplate = testTemplate + `{{ range .Post.Images }}IMG={{ .Src }} {{ .Width }}x{{ .Height }}
+{{ end }}`
+
+// fixtureTransport serves the landscape fixture for every request
+// without going through the image server, so that dimension lookups
+// don't show up in the image server's request log.
+type fixtureTransport struct{ data []byte }
+
+func (f fixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	if strings.Contains(r.URL.Path, "missing") {
+		http.NotFound(rec, r)
+	} else {
+		rec.Write(f.data)
+	}
+	return rec.Result(), nil
+}
 
 type imageServer struct {
 	*httptest.Server
@@ -77,7 +96,7 @@ func buildSite(t *testing.T, srv *imageServer, files map[string]string) string {
 	base := map[string]string{
 		"meta.yml":                   "name: Test\nurl: https://example.com\n",
 		"static/.keep":               "",
-		"templates/photos.html":      testTemplate,
+		"templates/photos.html":      photosTemplate,
 		"templates/post.html":        testTemplate,
 		"templates/photography.html": testTemplate,
 		"templates/home.html":        testTemplate,
@@ -96,6 +115,17 @@ func buildSite(t *testing.T, srv *imageServer, files map[string]string) string {
 	prevGen := ogGen
 	ogGen = &og.Generator{Client: srv.Client(), CacheDir: t.TempDir()}
 	t.Cleanup(func() { ogGen = prevGen })
+
+	fixture, err := os.ReadFile(filepath.Join("..", "og", "testdata", "landscape.jpg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prevProber := imgProber
+	imgProber = &imgsize.Prober{
+		Client:   &http.Client{Transport: fixtureTransport{fixture}},
+		CacheDir: t.TempDir(),
+	}
+	t.Cleanup(func() { imgProber = prevProber })
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -316,5 +346,20 @@ func TestResolveImage(t *testing.T) {
 		if got := resolveImage(c.src, "https://example.com/posts/trip/"); got != c.want {
 			t.Fatalf("resolveImage(%q) = %q, want %q", c.src, got, c.want)
 		}
+	}
+}
+
+func TestBuildPhotoAlbumRendersImageDimensions(t *testing.T) {
+	srv := newImageServer(t)
+	root := buildSite(t, srv, map[string]string{
+		"pages/photos/hampi.md": "---\nlayout: photos\ntitle: Hampi\nimages:\n  - SRV/hampi/first.webp\n  - SRV/hampi/missing.webp\n---\n",
+	})
+
+	html := readBuilt(t, root, "photos/hampi/index.html")
+	if !strings.Contains(html, "IMG="+srv.URL+"/hampi/first.webp 600x400\n") {
+		t.Fatalf("missing dimensions for first image:\n%s", html)
+	}
+	if !strings.Contains(html, "IMG="+srv.URL+"/hampi/missing.webp 0x0\n") {
+		t.Fatalf("missing image should render with zero dimensions:\n%s", html)
 	}
 }

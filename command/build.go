@@ -10,6 +10,7 @@ import (
 	"time"
 
 	cnst "github.com/danishprakash/kizai/constants"
+	"github.com/danishprakash/kizai/imgsize"
 	"github.com/danishprakash/kizai/markdown"
 	md "github.com/danishprakash/kizai/markdown"
 	"github.com/danishprakash/kizai/og"
@@ -27,7 +28,8 @@ type Blog struct {
 var (
 	meta = md.Meta{}
 
-	ogGen = og.NewGenerator()
+	ogGen     = og.NewGenerator()
+	imgProber = imgsize.NewProber()
 	// photo album slug => cover image, from pages/photos/index.yaml
 	photoCovers = map[string]string{}
 )
@@ -175,13 +177,18 @@ func processPage(file, dir string) (*markdown.Post, error) {
 	}
 
 	// Parse the images (only for individual photo pages, not the photos index)
-	var images []string
-	var err error
+	var srcs []string
+	var images []md.Image
 	if page.Frontmatter["layout"] == "photos" {
-		images, err = ParseImagesFromFrontmatter(page.Frontmatter)
+		var err error
+		srcs, err = ParseImagesFromFrontmatter(page.Frontmatter)
 		if err != nil {
 			logrus.Errorf("failed to parse images: %+v", err)
-			images = []string{}
+		}
+		// dimensions let browsers reserve space before images load,
+		// otherwise every lazy image starts out in the viewport
+		for i, s := range imgProber.GetAll(srcs) {
+			images = append(images, md.Image{Src: srcs[i], Width: s.Width, Height: s.Height})
 		}
 	}
 
@@ -203,11 +210,10 @@ func processPage(file, dir string) (*markdown.Post, error) {
 
 	page.CanonicalURL = canonicalURL(htmlFile)
 	if slug != "" {
-		page.OGImage = generateOGImage(ogSource(page.Frontmatter, images, slug, page.Markdown), htmlDir)
+		page.OGImage = generateOGImage(ogSource(page.Frontmatter, srcs, slug, page.Markdown), htmlDir)
 	}
 
-	err = page.RenderHTML(htmlFile)
-	if err != nil {
+	if err := page.RenderHTML(htmlFile); err != nil {
 		logrus.Errorf("processDir: %+v", err)
 	}
 

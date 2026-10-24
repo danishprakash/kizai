@@ -44,7 +44,15 @@ type Post struct {
 	Frontmatter map[string]interface{}
 	Body        string
 	URL         string
-	Images      []string
+	Images      []Image
+}
+
+// Image is a photo on an album page. Width and Height are zero when
+// the dimensions couldn't be determined.
+type Image struct {
+	Src    string
+	Width  int
+	Height int
 }
 
 // ParseMarkdown parse a markdown file into frontmatter and body
