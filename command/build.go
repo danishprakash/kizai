@@ -159,6 +159,9 @@ func processPage(file, dir string) (*markdown.Post, error) {
 		if err := page.ParseYAML(srcFilepath); err != nil {
 			logrus.Errorf("processDir: failed for file %s: %+v", htmlFile, err)
 		}
+		if page.Yaml["layout"] == "photography" {
+			setPhotoCounts(page.Yaml, srcDir)
+		}
 	} else {
 		if err := page.ParseMarkdown(srcFilepath); err != nil {
 			logrus.Errorf("processDir: failed for file %s: %+v", htmlFile, err)
@@ -257,6 +260,41 @@ func clearIfDirExists(dir string) {
 func setup() {
 	clearIfDirExists(cnst.BUILD_DIR)
 	os.Mkdir(cnst.BUILD_DIR, 0755)
+}
+
+// setPhotoCounts sets the count of each entry in the photos
+// index to the number of images in its album page, i.e.
+// <srcDir>/<slug>.md, so the index needn't hardcode it.
+func setPhotoCounts(yamlData map[string]interface{}, srcDir string) {
+	photos, ok := yamlData["photos"].([]interface{})
+	if !ok {
+		return
+	}
+
+	for _, p := range photos {
+		entry, ok := p.(map[interface{}]interface{})
+		if !ok {
+			continue
+		}
+
+		albumPath := filepath.Join(srcDir, fmt.Sprintf("%v.md", entry["slug"]))
+		if _, err := os.Stat(albumPath); err != nil {
+			logrus.Errorf("setPhotoCounts: %+v", err)
+			continue
+		}
+		album := md.Page{}
+		if err := album.ParseMarkdown(albumPath); err != nil {
+			logrus.Errorf("setPhotoCounts: failed for file %s: %+v", albumPath, err)
+			continue
+		}
+
+		images, err := ParseImagesFromFrontmatter(album.Frontmatter)
+		if err != nil {
+			logrus.Errorf("setPhotoCounts: failed for file %s: %+v", albumPath, err)
+			continue
+		}
+		entry["count"] = len(images)
+	}
 }
 
 func ParseImagesFromFrontmatter(fm map[string]interface{}) ([]string, error) {
