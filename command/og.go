@@ -116,10 +116,28 @@ func localStaticFile(abs string) string {
 	return filepath.Join(cnst.BASE_DIR, filepath.FromSlash(u.Path))
 }
 
+// allowedHost reports whether OG images may be fetched from abs, as
+// per og_image_hosts in meta.yml. All hosts are allowed if it's unset.
+func allowedHost(abs string) bool {
+	if len(meta.OGImageHosts) == 0 {
+		return true
+	}
+	u, err := url.Parse(abs)
+	if err != nil {
+		return false
+	}
+	for _, h := range meta.OGImageHosts {
+		if u.Hostname() == h {
+			return true
+		}
+	}
+	return false
+}
+
 // generateOGImage renders src into dir/og.jpg and returns its absolute
 // URL. Images from this site's static dir are read from disk, others
-// are fetched. Failures are logged and yield "" so that the build
-// carries on.
+// are fetched if their host is allowed. Failures are logged and yield
+// "" so that the build carries on.
 func generateOGImage(src, dir string) string {
 	abs := resolveImage(src, pageURL(dir))
 	if abs == "" {
@@ -132,8 +150,11 @@ func generateOGImage(src, dir string) string {
 		if data, err = os.ReadFile(local); err == nil {
 			data, err = og.Render(data)
 		}
-	} else {
+	} else if allowedHost(abs) {
 		data, err = ogGen.Generate(abs)
+	} else {
+		logrus.Debugf("og: skipping %s: host not in og_image_hosts: %s", dir, abs)
+		return ""
 	}
 	if err != nil {
 		logrus.Warnf("og: skipping %s: %v", dir, err)

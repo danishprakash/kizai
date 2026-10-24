@@ -18,6 +18,8 @@ type Meta struct {
 	Name  string `yaml:"name"`
 	URL   string `yaml:"url"`
 	Title string `yaml:"title"`
+	// remote hosts OG images may be fetched from, all if empty
+	OGImageHosts []string `yaml:"og_image_hosts"`
 }
 
 // Page stores an information for a page

@@ -230,6 +230,39 @@ func TestBuildContinuesWhenImageFetchFails(t *testing.T) {
 	}
 }
 
+func TestBuildOnlyFetchesAllowedHosts(t *testing.T) {
+	var logs bytes.Buffer
+	logrus.SetOutput(&logs)
+	defer logrus.SetOutput(os.Stderr)
+
+	srv := newImageServer(t)
+	// same server, reached through a host that isn't allowed
+	other := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
+	fixture, err := os.ReadFile(filepath.Join("..", "og", "testdata", "portrait.webp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := buildSite(t, srv, map[string]string{
+		"meta.yml":                     "name: Test\nurl: https://example.com\nog_image_hosts:\n  - 127.0.0.1\n",
+		"static/img/posts/trip/a.webp": string(fixture),
+		"pages/photos/allowed.md":      "---\nlayout: photos\ntitle: Allowed\nimages:\n  - SRV/allowed/a.webp\n---\n",
+		"pages/posts/external.md":      "---\nlayout: post\ntitle: External\ndate: 2024-01-04\n---\n\n![x](" + other + "/external/a.png)\n",
+		"pages/posts/override.md":      "---\nlayout: post\ntitle: Override\ndate: 2024-01-05\nog_image: " + other + "/override/a.png\n---\n",
+		"pages/posts/local.md":         "---\nlayout: post\ntitle: Local\ndate: 2024-01-06\n---\n\n<img src=\"/static/img/posts/trip/a.webp\">\n",
+	})
+
+	assertOGFile(t, root, "photos/allowed/og.jpg")
+	assertOGFile(t, root, "posts/local/og.jpg")
+	assertNoOGFile(t, root, "posts/external/og.jpg")
+	assertNoOGFile(t, root, "posts/override/og.jpg")
+	if srv.requested("/external/a.png") || srv.requested("/override/a.png") {
+		t.Fatalf("disallowed hosts must not be fetched, got %v", srv.paths)
+	}
+	if strings.Contains(logs.String(), "level=warning") {
+		t.Fatalf("disallowed hosts must be skipped quietly, got: %q", logs.String())
+	}
+}
+
 func TestBuildPostUsesLocalStaticImage(t *testing.T) {
 	srv := newImageServer(t)
 	fixture, err := os.ReadFile(filepath.Join("..", "og", "testdata", "portrait.webp"))
